@@ -164,7 +164,6 @@ class Scraper:
             logger.warning(f"Could not extract shiurim via JS: {e}")
         filters_data = []
         try:
-            # --- FIX: בדיקה אם רכיב המסננים קיים לפני שמנסים לגשת אליו ---
             if self.driver.find_elements(By.CSS_SELECTOR, "app-filter-container"):
                 filter_groups = self.driver.find_elements(By.CSS_SELECTOR, "app-filter-container")
                 for group in filter_groups:
@@ -205,6 +204,14 @@ class Scraper:
             time.sleep(2)
             rav_results = self.driver.find_elements(By.CSS_SELECTOR, ".rav-container")
             if rav_results:
+                # --- FIX: המתנה חכמה לטעינת שמות הרבנים ---
+                try:
+                    WebDriverWait(self.driver, 10).until(
+                        lambda d: d.find_element(By.CSS_SELECTOR, ".rav-container .rav-name").text.strip() != ""
+                    )
+                except TimeoutException:
+                    logger.warning("Timed out waiting for rav names to load. Proceeding anyway.")
+                # ---------------------------------------------
                 rav_list = self.driver.execute_script("""
                 let ravs = [];
                 document.querySelectorAll('.rav-container').forEach((el, i) => {
@@ -219,10 +226,13 @@ class Scraper:
         except TimeoutException:
             return {'type': 'error', 'message': 'לא נמצאו תוצאות.'}
 
+    # --- FIX: פונקציית רענון שבאמת מרעננת את הדף ---
     def refresh_current_page(self):
-        self._update_status("מרענן נתונים מהעמוד הנוכחי...")
-        logger.info("Refreshing data from current page.")
+        self._update_status("מרענן את הדף...")
+        logger.info("Refreshing browser page.")
+        self.driver.refresh()
         return self._handle_results_page()
+    # ------------------------------------------------
 
     def perform_search(self, query: str):
         self._update_status(f"מבצע חיפוש: '{query}'...")
