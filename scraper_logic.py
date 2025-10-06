@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # --- הגדרות משתמש ---
 CODE_VALUE = "409573"
 PASSWORD_VALUE = "220106"
-RUN_HEADLESS = True
+RUN_HEADLESS = False
 TOPICS_FILE = Path("topics.json")
 LOGIN_URL = "https://www2.kolhalashon.com/#/login/%2FregularSite%2Fnew"
 CONFIG_FILE = Path("config.ini")
