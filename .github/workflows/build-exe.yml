@@ -27,7 +27,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe
-        run: pyinstaller --onefile --icon=icon.ico --add-data "topics.json;." "scraper_logic.py;." main_gui.py
+        run: pyinstaller --onefile --icon=icon.ico --add-data "topics.json;." main_gui.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
