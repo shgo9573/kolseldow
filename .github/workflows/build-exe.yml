@@ -21,16 +21,12 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Build exe
-        run: |
-          pyinstaller `
-            --onefile `
-            --icon=icon.ico `
-            --add-data "topics.json;." `
-            main_gui.py
+        run: pyinstaller --onefile --icon=icon.ico --add-data "topics.json;." main_gui.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
