@@ -1,4 +1,4 @@
-name: Build EXE
+name: Build and Commit EXE
 
 on:
   push:
@@ -10,27 +10,45 @@ jobs:
   build:
     runs-on: windows-latest
 
+    # --- תוספת חדשה ---
+    # הענקת הרשאות כתיבה ל-job כדי שיוכל לבצע push לריפו
+    permissions:
+      contents: write
+    # ---------------------
+
     steps:
+      # 1. הורדת הקוד מהריפו
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. הגדרת סביבת פייתון
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # 3. התקנת תלויות ו-PyInstaller
       - name: Install dependencies
         run: |
-          # שורה 24 שלך אמורה להיות כאן, בהזחה של 10 רווחים
-          python -m pip install --upgrade pip 
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # 4. בניית קובץ ה-EXE
       - name: Build exe
         run: pyinstaller --onefile --icon=icon.ico --add-data "topics.json;." main_gui.py
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      # 5. ביצוע Commit ו-Push לקובץ ה-EXE שנוצר
+      - name: Commit and Push EXE
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          name: exe-build
-          path: dist/main_gui.exe
+          # הודעת ה-commit
+          commit_message: "CI: Add/update EXE build"
+          
+          # הנתיב לקובץ שנוצר
+          file_pattern: dist/*.exe
+          
+          # הענף אליו יידחף הקובץ (במקרה זה, הענף הנוכחי)
+          # הערה: ייתכן שתצטרך להתאים את זה בהתאם לאופן העבודה שלך
+          # למשל, אם אתה תמיד רוצה לדחוף ל-main: branch: main
+          branch: ${{ github.head_ref }}
