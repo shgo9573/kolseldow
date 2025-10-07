@@ -5,10 +5,9 @@ from scraper_logic import Scraper
 from tkinter import Menu
 import platform
 import logging
-from functools import partial
 
 if platform.system() == "Windows":
-    from win32api import GetLogicalDriveStrings
+    from win32api import GetLogicalDriveStrings, GetVolumeInformation
     
 def rtl_fix(text):
     text_str = str(text)
@@ -38,7 +37,7 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("Light")
 
         self.title(rtl_fix("ממשק כל השיעורים"))
-        self.geometry("1200x800") # הגדלת הגובה כדי להכיל את אזור ההורדות
+        self.geometry("1200x750")
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -58,7 +57,7 @@ class App(ctk.CTk):
         # --- סרגל עליון ---
         self.top_frame = ctk.CTkFrame(self, height=50, corner_radius=0)
         self.top_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
-        self.top_frame.grid_columnconfigure(4, weight=1)
+        self.top_frame.grid_columnconfigure(4, weight=1) # שונה ל-4
         self.top_frame.grid_rowconfigure(1, weight=1)
 
         instruction_label = ctk.CTkLabel(self.top_frame, text=rtl_fix("לחיפוש רבנים יש להוסיף 'הרב' בתחילת החיפוש"), font=ctk.CTkFont(size=11), text_color="gray50")
@@ -71,11 +70,13 @@ class App(ctk.CTk):
         self.search_button = ctk.CTkButton(self.top_frame, text=rtl_fix("חיפוש"), width=100, command=self.start_search)
         self.search_button.grid(row=1, column=3, padx=(5, 5), pady=(0, 10))
         
-        self.reload_data_button = ctk.CTkButton(self.top_frame, text=rtl_fix("טען מחדש"), width=100, command=self.start_reload_data)
-        self.reload_data_button.grid(row=1, column=2, padx=(5, 5), pady=(0, 10))
+        # --- NEW: שני כפתורי רענון ---
+        self.reload_button = ctk.CTkButton(self.top_frame, text=rtl_fix("רענן דף"), width=100, command=self.start_browser_refresh)
+        self.reload_button.grid(row=1, column=2, padx=(5, 5), pady=(0, 10))
         
-        self.refresh_browser_button = ctk.CTkButton(self.top_frame, text=rtl_fix("רענן דף"), width=90, command=self.start_browser_refresh)
-        self.refresh_browser_button.grid(row=1, column=1, padx=(5, 5), pady=(0, 10))
+        self.re_extract_button = ctk.CTkButton(self.top_frame, text=rtl_fix("טען מחדש"), width=100, command=self.start_content_refresh)
+        self.re_extract_button.grid(row=1, column=1, padx=(5, 5), pady=(0, 10))
+        # -----------------------------
         
         self.categories_button = ctk.CTkButton(self.top_frame, text=rtl_fix("קטגוריות"), width=120)
         self.categories_button.grid(row=1, column=0, padx=(10, 5), pady=(0, 10))
@@ -106,8 +107,12 @@ class App(ctk.CTk):
         self.results_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=0)
         
         # --- סרגל תחתון ---
-        self.pagination_frame = ctk.CTkFrame(self)
-        self.pagination_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10))
+        self.bottom_frame = ctk.CTkFrame(self)
+        self.bottom_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.bottom_frame.grid_columnconfigure(1, weight=1)
+
+        self.pagination_frame = ctk.CTkFrame(self.bottom_frame)
+        self.pagination_frame.grid(row=0, column=1, sticky="ew", padx=10, pady=(0, 10))
         self.pagination_frame.grid_columnconfigure(1, weight=1)
         
         self.drive_selector_frame = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
@@ -118,50 +123,60 @@ class App(ctk.CTk):
         self.next_page_button = ctk.CTkButton(self.pagination_frame, text=rtl_fix("העמוד הבא ->"), command=self.go_to_next_page, state="disabled")
         self.next_page_button.grid(row=0, column=1, padx=10, pady=5)
         
-        # --- NEW: אזור התקדמות הורדות ---
-        self.downloads_frame = ctk.CTkScrollableFrame(self, label_text=rtl_fix("הורדות פעילות"), height=100)
-        self.downloads_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+        # --- NEW: סרגל התקדמות ---
+        self.progress_bar = ctk.CTkProgressBar(self.bottom_frame, orientation="horizontal", mode="indeterminate")
+        # הסרגל יופיע רק כשצריך
         
         self.status_bar = ctk.CTkLabel(self, text=rtl_fix("ממתין..."), anchor="e", height=25)
         self.status_bar.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0,5))
 
     def get_drives(self):
         drives = []
+        drive_map = {}
         if platform.system() == "Windows":
             try:
                 drive_str = GetLogicalDriveStrings()
-                drives.extend([d for d in drive_str.split('\000') if d])
+                raw_drives = [d for d in drive_str.split('\000') if d]
+                for d in raw_drives:
+                    try:
+                        # --- FIX: קבלת שם הכונן ---
+                        volume_name, _, _, _, _ = GetVolumeInformation(d)
+                        display_name = f"{volume_name} ({d.strip()})"
+                        drives.append(display_name)
+                        drive_map[display_name] = d
+                    except Exception:
+                        drives.append(d)
+                        drive_map[d] = d
             except Exception as e:
                 logger.error(f"Could not get drive list: {e}")
-        if not drives:
-            drives = ["C:\\"]
-        return drives
+        return drives, drive_map
 
     def setup_drive_selector(self):
-        drives = self.get_drives()
-        # --- FIX: הסרת "Downloads" והגדרת ברירת מחדל ---
-        default_drive = "C:\\KolHalashon_Downloads"
-        if default_drive not in drives:
-            drives.insert(0, default_drive)
-        
+        drives, drive_map = self.get_drives()
+        self.drive_map = drive_map
         self.drive_option_menu = ctk.CTkOptionMenu(self.drive_selector_frame, values=drives, command=self.on_drive_selected)
-        self.drive_option_menu.set(default_drive)
-        self.on_drive_selected(default_drive)
         self.drive_option_menu.pack(side="right", padx=5)
-
+        
         refresh_drive_button = ctk.CTkButton(self.drive_selector_frame, text="🔄", width=28, height=28, command=self.refresh_drives)
         refresh_drive_button.pack(side="right", padx=(0, 5))
 
     def refresh_drives(self):
-        new_drives = self.get_drives()
+        new_drives, new_drive_map = self.get_drives()
+        self.drive_map = new_drive_map
         self.drive_option_menu.configure(values=new_drives)
+        if new_drives:
+            self.drive_option_menu.set(new_drives[0])
+            self.on_drive_selected(new_drives[0])
         self.update_status("רשימת הכוננים עודכנה.")
 
-    def on_drive_selected(self, selected_drive):
-        self.scraper.set_final_download_path(selected_drive)
+    def on_drive_selected(self, selected_display_name):
+        path = self.drive_map.get(selected_display_name, str(Path.home() / 'Downloads'))
+        self.scraper.set_final_download_path(path)
 
     def run_in_thread(self, target_func, callback=None, *args):
         def thread_target():
+            self.progress_bar.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5,0))
+            self.progress_bar.start()
             self.set_ui_state("disabled")
             try:
                 result = target_func(*args)
@@ -172,15 +187,18 @@ class App(ctk.CTk):
                 self.update_status(f"❌ שגיאה כללית. בדוק את קובץ הלוג.")
             finally:
                 self.set_ui_state("normal")
+                self.progress_bar.stop()
+                self.progress_bar.grid_forget()
         threading.Thread(target=thread_target, daemon=True).start()
 
     def set_ui_state(self, state):
         self.search_button.configure(state=state)
         self.categories_button.configure(state=state)
-        self.reload_data_button.configure(state=state)
-        self.refresh_browser_button.configure(state="normal")
+        self.reload_button.configure(state="normal")
+        self.re_extract_button.configure(state="normal")
         self.next_page_button.configure(state="disabled" if state == "disabled" else "normal")
 
+    # ... שאר הפונקציות נשארות זהות ...
     def update_status(self, message):
         self.status_bar.configure(text=rtl_fix(message))
         logger.info(f"Status Updated: {message}")
@@ -215,11 +233,11 @@ class App(ctk.CTk):
 
     def start_browser_refresh(self):
         if not self.is_logged_in: return
-        self.run_in_thread(self.scraper.refresh_browser_and_page, self.handle_results)
+        self.run_in_thread(self.scraper.refresh_browser_page, self.handle_results)
 
-    def start_reload_data(self):
+    def start_content_refresh(self):
         if not self.is_logged_in: return
-        self.run_in_thread(self.scraper.reload_data_from_page, self.handle_results)
+        self.run_in_thread(self.scraper.refresh_current_page_content, self.handle_results)
 
     def clear_results_and_filters(self):
         for widget in self.results_frame.winfo_children(): widget.destroy()
@@ -262,39 +280,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(details_frame, text=rtl_fix(shiur['title']), justify="right", font=ctk.CTkFont(weight="bold")).pack(fill="x")
             ctk.CTkLabel(details_frame, text=rtl_fix(f"{shiur['rav']} | {shiur['date']}"), justify="right", font=ctk.CTkFont(size=10)).pack(fill="x")
             ctk.CTkButton(frame, text=rtl_fix("הורדה"), width=100,
-                          command=partial(self.start_download, shiur)).grid(row=0, column=1, padx=10, pady=5)
-
-    # --- NEW: מנגנון התקדמות הורדה ---
-    def start_download(self, shiur_data):
-        download_entry = ctk.CTkFrame(self.downloads_frame, fg_color="transparent")
-        download_entry.pack(fill="x", padx=5, pady=2)
-        
-        label_text = f"{shiur_data['title']} - {shiur_data['rav']}"
-        label = ctk.CTkLabel(download_entry, text=rtl_fix(label_text), anchor="e", justify="right")
-        label.pack(side="right", fill="x", expand=True, padx=5)
-        
-        progress_bar = ctk.CTkProgressBar(download_entry, width=200)
-        progress_bar.set(0)
-        progress_bar.pack(side="left", padx=5)
-
-        def update_progress(progress_value):
-            self.after(0, progress_bar.set, progress_value)
-
-        def on_completion(filename, error_msg):
-            if error_msg:
-                self.after(0, label.configure, {"text": rtl_fix(f"{label_text} - {error_msg}"), "text_color": "red"})
-                self.after(5000, download_entry.destroy)
-            else:
-                self.after(0, progress_bar.set, 1)
-                self.after(0, label.configure, {"text": rtl_fix(f"{label_text} - הושלם!")})
-                self.after(3000, download_entry.destroy)
-
-        threading.Thread(
-            target=self.scraper.download_shiur_by_id,
-            args=(shiur_data['id'], update_progress, on_completion),
-            daemon=True
-        ).start()
-    # ------------------------------------
+                          command=lambda s_id=shiur['id']: threading.Thread(target=lambda: self.scraper.download_shiur_by_id(s_id), daemon=True).start()).grid(row=0, column=1, padx=10, pady=5)
 
     def populate_filters(self, filters_data):
         VISIBLE_FILTERS_COUNT = 5
