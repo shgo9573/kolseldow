@@ -36,11 +36,9 @@ class Scraper:
         self.topics_data = None
         self.temp_download_path = str(Path.home() / 'Downloads' / 'kol_halashon_temp')
         os.makedirs(self.temp_download_path, exist_ok=True)
-        self.final_download_path = "C:\\KolHalashon_Downloads"
-        os.makedirs(self.final_download_path, exist_ok=True)
+        self.final_download_path = str(Path.home() / 'Downloads')
 
     def set_final_download_path(self, path):
-        os.makedirs(path, exist_ok=True)
         self.final_download_path = path
         self._update_status(f"ההורדות הבאות יישמרו ב: {self.final_download_path}")
         logger.info(f"Final download path set to: {self.final_download_path}")
@@ -110,13 +108,12 @@ class Scraper:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        # --- FIX: הגדרה לאישור אוטומטי של הורדות מרובות ---
         prefs = {
             "download.default_directory": self.temp_download_path,
+            # --- FIX: אישור אוטומטי להורדות מרובות ---
             "profile.default_content_setting_values.automatic_downloads": 1
         }
         chrome_options.add_experimental_option("prefs", prefs)
-        # ----------------------------------------------------
         
         driver = webdriver.Chrome(service=service, options=chrome_options)
         return driver
@@ -169,88 +166,92 @@ class Scraper:
             shiurim_list = []
             self._update_status("אזהרה: שגיאה בקריאת פרטי השיעורים.")
             logger.warning(f"Could not extract shiurim via JS: {e}")
-
         filters_data = []
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                if self.driver.find_elements(By.CSS_SELECTOR, "app-filter-container"):
-                    filter_groups = self.driver.find_elements(By.CSS_SELECTOR, "app-filter-container")
-                    for group in filter_groups:
-                        header = group.find_element(By.CSS_SELECTOR, ".filter-header")
-                        category_title = header.text.strip()
-                        if not category_title: continue
-                        inner_container = group.find_element(By.CSS_SELECTOR, ".filter-container")
-                        if "opened" not in inner_container.get_attribute("class"): self._js_click(header); time.sleep(0.5)
-                        while True:
-                            try:
-                                show_more = group.find_element(By.XPATH, ".//div[contains(@class, 'display-more') and contains(normalize-space(), 'הצג עוד')]")
-                                self._js_click(show_more); time.sleep(0.5)
-                            except NoSuchElementException: break
-                        WebDriverWait(self.driver, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "mat-checkbox.filter-option")))
-                        time.sleep(0.5)
-                        options = group.find_elements(By.CSS_SELECTOR, "mat-checkbox.filter-option")
-                        category_filters = []
-                        for option in options:
-                            label_el = option.find_element(By.CSS_SELECTOR, ".mat-checkbox-label")
-                            full_label = self.driver.execute_script("return arguments[0].textContent;", label_el).strip().replace('\n', ' ').replace('  ', ' ')
-                            if full_label:
-                                category_filters.append(full_label)
-                        if category_filters:
-                            filters_data.append({'category_name': category_title, 'filters': category_filters})
-                    if filters_data:
-                        break
-            except Exception as e:
-                logger.warning(f"Attempt {attempt + 1} to extract filters failed: {e}")
-            
-            if not filters_data and attempt < max_retries - 1:
-                logger.info(f"No filters found, retrying in 2 seconds... (Attempt {attempt + 2}/{max_retries})")
-                self._update_status(f"מנסה לטעון מסננים... ({attempt + 2}/{max_retries})")
-                time.sleep(2)
-
-        if not filters_data:
-            self._update_status("אזהרה: לא נטענו מסננים.")
-            logger.warning("Could not extract filters after multiple retries.")
-            
+        try:
+            if self.driver.find_elements(By.CSS_SELECTOR, "app-filter-container"):
+                filter_groups = self.driver.find_elements(By.CSS_SELECTOR, "app-filter-container")
+                for group in filter_groups:
+                    header = group.find_element(By.CSS_SELECTOR, ".filter-header")
+                    category_title = header.text.strip()
+                    if not category_title: continue
+                    inner_container = group.find_element(By.CSS_SELECTOR, ".filter-container")
+                    if "opened" not in inner_container.get_attribute("class"): self._js_click(header); time.sleep(0.5)
+                    while True:
+                        try:
+                            show_more = group.find_element(By.XPATH, ".//div[contains(@class, 'display-more') and contains(normalize-space(), 'הצג עוד')]")
+                            self._js_click(show_more); time.sleep(0.5)
+                        except NoSuchElementException: break
+                    WebDriverWait(self.driver, 5).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "mat-checkbox.filter-option")))
+                    time.sleep(0.5)
+                    options = group.find_elements(By.CSS_SELECTOR, "mat-checkbox.filter-option")
+                    category_filters = []
+                    for option in options:
+                        label_el = option.find_element(By.CSS_SELECTOR, ".mat-checkbox-label")
+                        full_label = self.driver.execute_script("return arguments[0].textContent;", label_el).strip().replace('\n', ' ').replace('  ', ' ')
+                        if full_label:
+                            category_filters.append(full_label)
+                    if category_filters:
+                        filters_data.append({'category_name': category_title, 'filters': category_filters})
+        except Exception as e:
+            self._update_status(f"אזהרה: לא ניתן היה לטעון מסננים.")
+            logger.warning(f"Could not extract filters: {e}")
         self._update_status(f"נמצאו {len(shiurim_list)} שיעורים ו-{len(filters_data)} קטגוריות סינון.")
         logger.info(f"Found {len(shiurim_list)} shiurim and {len(filters_data)} filter categories.")
         return {'type': 'shiurim_and_filters', 'data': {'shiurim': shiurim_list, 'filters': filters_data}}
 
+    # --- FIX: מנגנון ניסיונות חוזרים (Retry) ---
     def _handle_results_page(self):
-        try:
-            WebDriverWait(self.driver, 20).until(EC.any_of(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "app-shiurim-display .shiur-container")),
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".rav-container"))
-            ))
-            time.sleep(2)
-            rav_results = self.driver.find_elements(By.CSS_SELECTOR, ".rav-container")
-            if rav_results:
-                try:
-                    WebDriverWait(self.driver, 10).until(
-                        lambda d: d.find_element(By.CSS_SELECTOR, ".rav-container .rav-name").text.strip() != ""
-                    )
-                except TimeoutException:
-                    logger.warning("Timed out waiting for rav names to load. Proceeding anyway.")
-                rav_list = self.driver.execute_script("""
-                let ravs = [];
-                document.querySelectorAll('.rav-container').forEach((el, i) => {
-                    let name = el.querySelector('.rav-name')?.textContent.trim() || '';
-                    let count = el.querySelector('.rav-shiurim-sum')?.textContent.trim() || '';
-                    ravs.push({id: i, name: name, count: count});
-                });
-                return ravs;
-                """)
-                return {'type': 'rav_selection', 'data': rav_list}
-            return self._get_current_shiurim_and_filters()
-        except TimeoutException:
-            return {'type': 'error', 'message': 'לא נמצאו תוצאות.'}
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                self._update_status(f"ממתין לתוצאות (ניסיון {attempt + 1}/{max_retries})...")
+                WebDriverWait(self.driver, 10).until(EC.any_of(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "app-shiurim-display .shiur-container")),
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".rav-container"))
+                ))
+                time.sleep(2)
+                rav_results = self.driver.find_elements(By.CSS_SELECTOR, ".rav-container")
+                if rav_results:
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            lambda d: d.find_element(By.CSS_SELECTOR, ".rav-container .rav-name").text.strip() != ""
+                        )
+                    except TimeoutException:
+                        logger.warning("Timed out waiting for rav names to load. Proceeding anyway.")
+                    rav_list = self.driver.execute_script("""
+                    let ravs = [];
+                    document.querySelectorAll('.rav-container').forEach((el, i) => {
+                        let name = el.querySelector('.rav-name')?.textContent.trim() || '';
+                        let count = el.querySelector('.rav-shiurim-sum')?.textContent.trim() || '';
+                        ravs.push({id: i, name: name, count: count});
+                    });
+                    return ravs;
+                    """)
+                    if rav_list and rav_list[0]['name']: # ודא שהשם באמת נטען
+                        return {'type': 'rav_selection', 'data': rav_list}
+                
+                shiurim = self.driver.find_elements(By.CSS_SELECTOR, "app-shiurim-display .shiur-container")
+                if shiurim:
+                    return self._get_current_shiurim_and_filters()
+                
+                # אם הגענו לכאן, משהו לא נטען עדיין, ננסה שוב
+                raise TimeoutException("Content not fully loaded, retrying...")
 
-    def reload_data_from_page(self):
+            except TimeoutException:
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                else:
+                    logger.error("Failed to get results after multiple retries.")
+                    return {'type': 'error', 'message': 'לא נמצאו תוצאות לאחר מספר ניסיונות.'}
+    # ----------------------------------------------------
+
+    def refresh_current_page_content(self):
         self._update_status("טוען מחדש נתונים מהעמוד...")
-        logger.info("Reloading data from current page state.")
-        return self._get_current_shiurim_and_filters()
+        logger.info("Re-extracting data from current page (no refresh).")
+        return self._handle_results_page()
 
-    def refresh_browser_and_page(self):
+    def refresh_browser_page(self):
         self._update_status("מרענן את הדף בדפדפן...")
         logger.info("Refreshing browser page.")
         self.driver.refresh()
@@ -279,8 +280,7 @@ class Scraper:
             logger.error(f"IndexError: rav_id {rav_id} is out of bounds for results list of size {len(fresh_rav_results)}.")
             return {'type': 'error', 'message': 'הרב לא נמצא'}
         self._js_click(fresh_rav_results[rav_id].find_element(By.CSS_SELECTOR, "a.rav-name"))
-        WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "app-shiurim-display .shiur-container")))
-        return self._get_current_shiurim_and_filters()
+        return self._handle_results_page()
 
     def apply_filter_by_name(self, filter_name: str):
         self._update_status(f"מפעיל מסנן: {filter_name}...")
@@ -311,19 +311,14 @@ class Scraper:
             if first_shiur_element:
                 WebDriverWait(self.driver, 20).until(EC.staleness_of(first_shiur_element))
             
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "app-shiurim-display"))
-            )
-            time.sleep(1)
-
-            return self._get_current_shiurim_and_filters()
+            return self._handle_results_page()
         except Exception as e:
             logger.error(f"Error in apply_filter_by_name for '{filter_name}': {e}")
             self._update_status(f"❌ שגיאה בהפעלת המסנן: {filter_name}")
             return {'type': 'error', 'message': f'שגיאה בהפעלת המסנן'}
             
-    # --- FIX: מנגנון הורדה משודרג עם callbacks להתקדמות ---
-    def download_shiur_by_id(self, shiur_id: int, progress_callback=None, completion_callback=None):
+    def download_shiur_by_id(self, shiur_id: int):
+        self._update_status(f"מתחיל הורדה לתיקייה זמנית...")
         logger.info(f"Initiating download for shiur ID: {shiur_id}")
         
         path_to_watch = self.temp_download_path
@@ -336,6 +331,7 @@ class Scraper:
             self._js_click(audio_option)
         except TimeoutException: pass
 
+        self._update_status("ממתין לסיום ההורדה...")
         logger.info("Waiting for download to complete...")
         
         wait_time = 300
@@ -343,10 +339,6 @@ class Scraper:
         new_file_path = None
         
         while time.time() - start_time < wait_time:
-            if progress_callback:
-                progress = (time.time() - start_time) / wait_time
-                progress_callback(progress)
-
             files_after = set(os.listdir(path_to_watch))
             new_files = files_after - files_before
             if new_files:
@@ -359,12 +351,11 @@ class Scraper:
             time.sleep(1)
 
         if not new_file_path:
+            self._update_status("❌ שגיאה: ההורדה לא הסתיימה בזמן.")
             logger.error("Download timed out.")
-            if completion_callback: completion_callback(None, "שגיאה: ההורדה לא הסתיימה בזמן.")
             return
 
-        if progress_callback: progress_callback(1.0) # עדכן ל-100%
-        
+        self._update_status("מעביר את הקובץ ליעד הסופי...")
         logger.info(f"Download finished: {new_file_path}. Moving to {self.final_download_path}")
         
         filename = os.path.basename(new_file_path)
@@ -378,9 +369,8 @@ class Scraper:
             
         shutil.move(new_file_path, destination_path)
         
+        self._update_status(f"✅ הורדה הושלמה ונשמרה ב: {self.final_download_path}")
         logger.info(f"File moved successfully to {destination_path}")
-        if completion_callback: completion_callback(filename, None)
-    # ----------------------------------------------------
         
     def navigate_to_next_page(self):
         try:
