@@ -5,6 +5,7 @@ from scraper_logic import Scraper
 from tkinter import Menu
 import platform
 import logging
+from pathlib import Path
 
 if platform.system() == "Windows":
     from win32api import GetLogicalDriveStrings, GetVolumeInformation
@@ -57,7 +58,7 @@ class App(ctk.CTk):
         # --- סרגל עליון ---
         self.top_frame = ctk.CTkFrame(self, height=50, corner_radius=0)
         self.top_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
-        self.top_frame.grid_columnconfigure(4, weight=1) # שונה ל-4
+        self.top_frame.grid_columnconfigure(4, weight=1)
         self.top_frame.grid_rowconfigure(1, weight=1)
 
         instruction_label = ctk.CTkLabel(self.top_frame, text=rtl_fix("לחיפוש רבנים יש להוסיף 'הרב' בתחילת החיפוש"), font=ctk.CTkFont(size=11), text_color="gray50")
@@ -70,13 +71,11 @@ class App(ctk.CTk):
         self.search_button = ctk.CTkButton(self.top_frame, text=rtl_fix("חיפוש"), width=100, command=self.start_search)
         self.search_button.grid(row=1, column=3, padx=(5, 5), pady=(0, 10))
         
-        # --- NEW: שני כפתורי רענון ---
         self.reload_button = ctk.CTkButton(self.top_frame, text=rtl_fix("רענן דף"), width=100, command=self.start_browser_refresh)
         self.reload_button.grid(row=1, column=2, padx=(5, 5), pady=(0, 10))
         
         self.re_extract_button = ctk.CTkButton(self.top_frame, text=rtl_fix("טען מחדש"), width=100, command=self.start_content_refresh)
         self.re_extract_button.grid(row=1, column=1, padx=(5, 5), pady=(0, 10))
-        # -----------------------------
         
         self.categories_button = ctk.CTkButton(self.top_frame, text=rtl_fix("קטגוריות"), width=120)
         self.categories_button.grid(row=1, column=0, padx=(10, 5), pady=(0, 10))
@@ -123,9 +122,7 @@ class App(ctk.CTk):
         self.next_page_button = ctk.CTkButton(self.pagination_frame, text=rtl_fix("העמוד הבא ->"), command=self.go_to_next_page, state="disabled")
         self.next_page_button.grid(row=0, column=1, padx=10, pady=5)
         
-        # --- NEW: סרגל התקדמות ---
         self.progress_bar = ctk.CTkProgressBar(self.bottom_frame, orientation="horizontal", mode="indeterminate")
-        # הסרגל יופיע רק כשצריך
         
         self.status_bar = ctk.CTkLabel(self, text=rtl_fix("ממתין..."), anchor="e", height=25)
         self.status_bar.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0,5))
@@ -139,9 +136,8 @@ class App(ctk.CTk):
                 raw_drives = [d for d in drive_str.split('\000') if d]
                 for d in raw_drives:
                     try:
-                        # --- FIX: קבלת שם הכונן ---
                         volume_name, _, _, _, _ = GetVolumeInformation(d)
-                        display_name = f"{volume_name} ({d.strip()})"
+                        display_name = f"{volume_name} ({d.strip()})" if volume_name else d.strip()
                         drives.append(display_name)
                         drive_map[display_name] = d
                     except Exception:
@@ -155,8 +151,11 @@ class App(ctk.CTk):
         drives, drive_map = self.get_drives()
         self.drive_map = drive_map
         self.drive_option_menu = ctk.CTkOptionMenu(self.drive_selector_frame, values=drives, command=self.on_drive_selected)
+        if drives:
+            self.drive_option_menu.set(drives[0])
+            self.on_drive_selected(drives[0])
         self.drive_option_menu.pack(side="right", padx=5)
-        
+
         refresh_drive_button = ctk.CTkButton(self.drive_selector_frame, text="🔄", width=28, height=28, command=self.refresh_drives)
         refresh_drive_button.pack(side="right", padx=(0, 5))
 
@@ -198,7 +197,6 @@ class App(ctk.CTk):
         self.re_extract_button.configure(state="normal")
         self.next_page_button.configure(state="disabled" if state == "disabled" else "normal")
 
-    # ... שאר הפונקציות נשארות זהות ...
     def update_status(self, message):
         self.status_bar.configure(text=rtl_fix(message))
         logger.info(f"Status Updated: {message}")
