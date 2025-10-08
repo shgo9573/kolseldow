@@ -9,6 +9,7 @@ import os
 from tkinter import filedialog
 import tkinter as tk
 import shutil
+import threading  # --- NEW: ייבוא ספריית ה-threading ---
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -37,6 +38,8 @@ class Scraper:
         self.temp_download_path = str(Path.home() / 'Downloads' / 'kol_halashon_temp')
         os.makedirs(self.temp_download_path, exist_ok=True)
         self.final_download_path = str(Path.home() / 'Downloads')
+        # --- NEW: יצירת מנעול למניעת התנגשות בהורדות ---
+        self.download_lock = threading.Lock()
 
     def set_final_download_path(self, path):
         self.final_download_path = path
@@ -110,7 +113,6 @@ class Scraper:
         
         prefs = {
             "download.default_directory": self.temp_download_path,
-            # --- FIX: אישור אוטומטי להורדות מרובות ---
             "profile.default_content_setting_values.automatic_downloads": 1
         }
         chrome_options.add_experimental_option("prefs", prefs)
@@ -199,7 +201,6 @@ class Scraper:
         logger.info(f"Found {len(shiurim_list)} shiurim and {len(filters_data)} filter categories.")
         return {'type': 'shiurim_and_filters', 'data': {'shiurim': shiurim_list, 'filters': filters_data}}
 
-    # --- FIX: מנגנון ניסיונות חוזרים (Retry) ---
     def _handle_results_page(self):
         max_retries = 3
         for attempt in range(max_retries):
@@ -227,14 +228,13 @@ class Scraper:
                     });
                     return ravs;
                     """)
-                    if rav_list and rav_list[0]['name']: # ודא שהשם באמת נטען
+                    if rav_list and rav_list[0]['name']:
                         return {'type': 'rav_selection', 'data': rav_list}
                 
                 shiurim = self.driver.find_elements(By.CSS_SELECTOR, "app-shiurim-display .shiur-container")
                 if shiurim:
                     return self._get_current_shiurim_and_filters()
                 
-                # אם הגענו לכאן, משהו לא נטען עדיין, ננסה שוב
                 raise TimeoutException("Content not fully loaded, retrying...")
 
             except TimeoutException:
@@ -244,7 +244,6 @@ class Scraper:
                 else:
                     logger.error("Failed to get results after multiple retries.")
                     return {'type': 'error', 'message': 'לא נמצאו תוצאות לאחר מספר ניסיונות.'}
-    # ----------------------------------------------------
 
     def refresh_current_page_content(self):
         self._update_status("טוען מחדש נתונים מהעמוד...")
@@ -318,59 +317,61 @@ class Scraper:
             return {'type': 'error', 'message': f'שגיאה בהפעלת המסנן'}
             
     def download_shiur_by_id(self, shiur_id: int):
-        self._update_status(f"מתחיל הורדה לתיקייה זמנית...")
-        logger.info(f"Initiating download for shiur ID: {shiur_id}")
-        
-        path_to_watch = self.temp_download_path
-        files_before = set(os.listdir(path_to_watch))
-
-        shiur_elements = self.driver.find_elements(By.CSS_SELECTOR, "app-shiurim-display .shiur-container")
-        self._js_click(shiur_elements[shiur_id].find_element(By.XPATH, ".//button[.//svg-icon[contains(@src, 'download-i.svg')]]"))
-        try:
-            audio_option = WebDriverWait(self.driver, 5).until(EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'download-option')]")))
-            self._js_click(audio_option)
-        except TimeoutException: pass
-
-        self._update_status("ממתין לסיום ההורדה...")
-        logger.info("Waiting for download to complete...")
-        
-        wait_time = 300
-        start_time = time.time()
-        new_file_path = None
-        
-        while time.time() - start_time < wait_time:
-            files_after = set(os.listdir(path_to_watch))
-            new_files = files_after - files_before
-            if new_files:
-                for f in new_files:
-                    if not f.endswith('.crdownload') and not f.endswith('.tmp'):
-                        new_file_path = os.path.join(path_to_watch, f)
-                        break
-            if new_file_path:
-                break
-            time.sleep(1)
-
-        if not new_file_path:
-            self._update_status("❌ שגיאה: ההורדה לא הסתיימה בזמן.")
-            logger.error("Download timed out.")
-            return
-
-        self._update_status("מעביר את הקובץ ליעד הסופי...")
-        logger.info(f"Download finished: {new_file_path}. Moving to {self.final_download_path}")
-        
-        filename = os.path.basename(new_file_path)
-        destination_path = os.path.join(self.final_download_path, filename)
-        
-        counter = 1
-        while os.path.exists(destination_path):
-            name, ext = os.path.splitext(filename)
-            destination_path = os.path.join(self.final_download_path, f"{name} ({counter}){ext}")
-            counter += 1
+        # --- FIX: שימוש במנעול כדי למנוע התנגשויות ---
+        with self.download_lock:
+            self._update_status(f"מתחיל הורדה לתיקייה זמנית...")
+            logger.info(f"Initiating download for shiur ID: {shiur_id}")
             
-        shutil.move(new_file_path, destination_path)
-        
-        self._update_status(f"✅ הורדה הושלמה ונשמרה ב: {self.final_download_path}")
-        logger.info(f"File moved successfully to {destination_path}")
+            path_to_watch = self.temp_download_path
+            files_before = set(os.listdir(path_to_watch))
+
+            shiur_elements = self.driver.find_elements(By.CSS_SELECTOR, "app-shiurim-display .shiur-container")
+            self._js_click(shiur_elements[shiur_id].find_element(By.XPATH, ".//button[.//svg-icon[contains(@src, 'download-i.svg')]]"))
+            try:
+                audio_option = WebDriverWait(self.driver, 5).until(EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'download-option')]")))
+                self._js_click(audio_option)
+            except TimeoutException: pass
+
+            self._update_status("ממתין לסיום ההורדה...")
+            logger.info("Waiting for download to complete...")
+            
+            wait_time = 300
+            start_time = time.time()
+            new_file_path = None
+            
+            while time.time() - start_time < wait_time:
+                files_after = set(os.listdir(path_to_watch))
+                new_files = files_after - files_before
+                if new_files:
+                    for f in new_files:
+                        if not f.endswith('.crdownload') and not f.endswith('.tmp'):
+                            new_file_path = os.path.join(path_to_watch, f)
+                            break
+                if new_file_path:
+                    break
+                time.sleep(1)
+
+            if not new_file_path:
+                self._update_status("❌ שגיאה: ההורדה לא הסתיימה בזמן.")
+                logger.error("Download timed out.")
+                return
+
+            self._update_status("מעביר את הקובץ ליעד הסופי...")
+            logger.info(f"Download finished: {new_file_path}. Moving to {self.final_download_path}")
+            
+            filename = os.path.basename(new_file_path)
+            destination_path = os.path.join(self.final_download_path, filename)
+            
+            counter = 1
+            while os.path.exists(destination_path):
+                name, ext = os.path.splitext(filename)
+                destination_path = os.path.join(self.final_download_path, f"{name} ({counter}){ext}")
+                counter += 1
+                
+            shutil.move(new_file_path, destination_path)
+            
+            self._update_status(f"✅ הורדה הושלמה ונשמרה ב: {self.final_download_path}")
+            logger.info(f"File moved successfully to {destination_path}")
         
     def navigate_to_next_page(self):
         try:
