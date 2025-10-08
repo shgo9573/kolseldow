@@ -55,6 +55,17 @@ class App(ctk.CTk):
         self.start_login()
 
     def create_widgets(self):
+        # --- FIX: יצירת שורת המצב וההתקדמות ראשונה כדי שתהיה תמיד זמינה ---
+        self.status_bar = ctk.CTkLabel(self, text=rtl_fix("ממתין..."), anchor="e", height=25)
+        self.status_bar.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0,5))
+        
+        self.bottom_frame = ctk.CTkFrame(self)
+        self.bottom_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.bottom_frame.grid_columnconfigure(1, weight=1)
+
+        self.progress_bar = ctk.CTkProgressBar(self.bottom_frame, orientation="horizontal", mode="indeterminate")
+        # --------------------------------------------------------------------
+
         # --- סרגל עליון ---
         self.top_frame = ctk.CTkFrame(self, height=50, corner_radius=0)
         self.top_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
@@ -105,11 +116,7 @@ class App(ctk.CTk):
         self.results_frame = ctk.CTkScrollableFrame(self.results_outer_frame, label_text=rtl_fix("תוצאות"))
         self.results_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=0)
         
-        # --- סרגל תחתון ---
-        self.bottom_frame = ctk.CTkFrame(self)
-        self.bottom_frame.grid(row=2, column=0, columnspan=2, sticky="ew")
-        self.bottom_frame.grid_columnconfigure(1, weight=1)
-
+        # --- סרגל תחתון (המשך) ---
         self.pagination_frame = ctk.CTkFrame(self.bottom_frame)
         self.pagination_frame.grid(row=0, column=1, sticky="ew", padx=10, pady=(0, 10))
         self.pagination_frame.grid_columnconfigure(1, weight=1)
@@ -121,11 +128,6 @@ class App(ctk.CTk):
         
         self.next_page_button = ctk.CTkButton(self.pagination_frame, text=rtl_fix("העמוד הבא ->"), command=self.go_to_next_page, state="disabled")
         self.next_page_button.grid(row=0, column=1, padx=10, pady=5)
-        
-        self.progress_bar = ctk.CTkProgressBar(self.bottom_frame, orientation="horizontal", mode="indeterminate")
-        
-        self.status_bar = ctk.CTkLabel(self, text=rtl_fix("ממתין..."), anchor="e", height=25)
-        self.status_bar.grid(row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0,5))
 
     def get_drives(self):
         drives = []
